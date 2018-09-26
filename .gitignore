@@ -1,0 +1,8 @@
+# Ignore everything
+*
+# But not these files...
+!/README.md
+!.gitignore
+!*/
+!/SabberStone/core-extensions/SabberStoneCoreAi/*
+!/SabberStone/core-extensions/SabberStoneCoreAi/src/*
