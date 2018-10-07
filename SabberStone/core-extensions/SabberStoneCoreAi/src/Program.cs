@@ -18,18 +18,22 @@ namespace SabberStoneCoreAi
 	{
 		private static readonly Random Rnd = new Random();
 
-		static int populationSize = 1; // How many decks are in a single generation.
-		static int generationLimit = 1; // How many generations to run in a single sitting.
+		static int populationSize = 3; // How many decks are in a single generation.
+		static int generationLimit = 2; // How many generations to run in a single sitting.
 
+		static int breedingPoolSize = 2;
 		static double mutationChance = 0.05d; // The probability for a random new child deck to mutate.
 
+		static List<Card> allCards;
 		static List<Card> availableCards; // List of cards to choose from when creating / mutating a deck.
 		static CardClass hero = CardClass.PALADIN; // The class used for all population decks.
+
+		static List<MemberDeck> population;
 
 		public class MemberDeck
 		{
 			public List<Card> deck;
-			public int fitnessScore; // Represents how fit the deck is, usually by winrate.
+			public double fitnessScore; // Represents how fit the deck is, usually by winrate.
 
 			public MemberDeck(){
 				deck = randomCards(30);
@@ -46,7 +50,7 @@ namespace SabberStoneCoreAi
 
 					// generate a new card until it's valid for this deck.
 					int count = deck.Where(s=>s!=null && s.Equals(newCard)).Count();
-					while (count < 2 && !newCard.Equals(deck[oldCard])) {
+					while (!newCard.Equals(deck[oldCard]) && ((newCard.Rarity == Rarity.LEGENDARY && count > 0) || count > 1)) {
 						newCard = randomCards(1)[1];
 						count = deck.Where(s=>s!=null && s.Equals(newCard)).Count();
 					}
@@ -59,63 +63,85 @@ namespace SabberStoneCoreAi
 		// Filter cards into the list of available cards
 		public static void filterCards()
 		{
-			availableCards = new List<Card>()
+			allCards = new List<Card>();
+			foreach (Card card in Cards.All)
 			{
-				Cards.FromName("Blessing of Might"),
-				Cards.FromName("Blessing of Might"),
-				Cards.FromName("Gnomish Inventor"),
-				Cards.FromName("Gnomish Inventor"),
-				Cards.FromName("Goldshire Footman"),
-				Cards.FromName("Goldshire Footman"),
-				Cards.FromName("Hammer of Wrath"),
-				Cards.FromName("Hammer of Wrath"),
-				Cards.FromName("Gnomish Inventor"),
-				Cards.FromName("Gnomish Inventor"),
-				Cards.FromName("Goldshire Footman"),
-				Cards.FromName("Goldshire Footman"),
-				Cards.FromName("Hammer of Wrath"),
-				Cards.FromName("Hammer of Wrath"),
-				Cards.FromName("Hand of Protection"),
-				Cards.FromName("Hand of Protection"),
-				Cards.FromName("Holy Light"),
-				Cards.FromName("Holy Light"),
-				Cards.FromName("Ironforge Rifleman"),
-				Cards.FromName("Ironforge Rifleman"),
-				Cards.FromName("Hand of Protection"),
-				Cards.FromName("Hand of Protection"),
-				Cards.FromName("Holy Light"),
-				Cards.FromName("Holy Light"),
-				Cards.FromName("Ironforge Rifleman"),
-				Cards.FromName("Ironforge Rifleman"),
-				Cards.FromName("Light's Justice"),
-				Cards.FromName("Light's Justice"),
-				Cards.FromName("Lord of the Arena"),
-				Cards.FromName("Lord of the Arena"),
-				Cards.FromName("Nightblade"),
-				Cards.FromName("Nightblade"),
-				Cards.FromName("Raid Leader"),
-				Cards.FromName("Raid Leader"),
-				Cards.FromName("Stonetusk Boar"),
-				Cards.FromName("Stonetusk Boar"),
-				Cards.FromName("Stormpike Commando"),
-				Cards.FromName("Stormpike Commando"),
-				Cards.FromName("Stormwind Champion"),
-				Cards.FromName("Stormwind Champion"),
-				Cards.FromName("Stormwind Knight"),
-				Cards.FromName("Stormwind Knight")
-			};
+				if (!allCards.Contains(card)
+                    && card.Implemented
+                    && card.Collectible
+                    && card.Set == CardSet.CORE || card.Set == CardSet.EXPERT1
+                    && card.Type != CardType.HERO
+                    && card.Type != CardType.ENCHANTMENT
+                    && card.Type != CardType.INVALID
+                    && card.Type != CardType.HERO_POWER
+                    && card.Type != CardType.TOKEN
+                    )
+                {
+                    allCards.Add(card);
+                }
+			}
+			availableCards = new List<Card>();
+			foreach (Card card in allCards)
+			{
+				if (card.Class == CardClass.NEUTRAL || card.Class ==  hero)
+                {
+                    availableCards.Add(card);
+                }
+			}
 		}
 
 		private static void Main(string[] args)
 		{
 			Console.WriteLine("Starting test setup.");
+			// initialize available cards and generate initial population
 			filterCards();
-			runGame();
-			for (int i = 0; i < generationLimit; i++){
-				for (int k = 0; k < populationSize; k++){}
+			population = new List<MemberDeck>();
+			for (int k = 0; k < populationSize; k++){
+				MemberDeck deck = new MemberDeck();
+				population.Add(deck);
 			}
-			//FullGame();
-			//RandomGames();
+
+			int currentGeneration = 1;
+			while (currentGeneration <= generationLimit){
+				foreach (MemberDeck currentDeck in population){
+					currentDeck.fitnessScore = EvaluateFitness(currentDeck.deck);
+				}
+
+				double maxFitnessScore = population[0].fitnessScore;
+				// this is where we should create the breeding pool yea?
+				List<MemberDeck> breedingPool = new List<MemberDeck>();
+				for (int i = 0; i < populationSize; i++){
+					Console.WriteLine($"Fitness of deck {i}: {population[i].fitnessScore}");
+					if (breedingPool.Count == 0)
+						breedingPool.Add(population[i]);
+					else if (population[i].fitnessScore > breedingPool[breedingPool.Count - 1].fitnessScore){
+						int j = breedingPoolSize - 1;
+						for (; j >= 0; j--){
+							Console.WriteLine($"Checking top fitness: {j}");
+							if (j == 0 || population[i].fitnessScore < breedingPool[j].fitnessScore)
+								break;
+						}
+						breedingPool.Insert(j, population[i]);
+						if (breedingPool.Count > breedingPoolSize)
+						breedingPool.RemoveAt(breedingPoolSize - 1);
+					}
+				}
+
+				Console.WriteLine($"Best fitness: {breedingPool[0].fitnessScore}");
+				Console.WriteLine("Composition of best deck: ----------------------");
+				for (int i = 0; i < 30; i++){
+					Console.WriteLine($"{breedingPool[0].deck[i].ToString()}");
+				}
+
+				currentGeneration++;
+				if (currentGeneration > generationLimit)
+					break;
+				else{
+					// generate new population
+					// create a pool from the best X decks
+
+				}
+			}
 			Console.WriteLine("Test end!");
 		}
 
@@ -150,15 +176,15 @@ namespace SabberStoneCoreAi
 					Player1HeroClass = hero,
 					Player1Deck = player1.deck,
 					Player2Name = "RehHausZuckFuchs",
-					Player2HeroClass = hero,
-					Player2Deck = player2.deck,
+					Player2HeroClass = CardClass.WARRIOR,
+					Player2Deck = Decks.AggroPirateWarrior,
 					FillDecks = false,
 					Shuffle = true,
 					SkipMulligan = false
 				});
 			game.StartGame();
 
-			var aiPlayer1 = new AggroScore();
+			var aiPlayer1 = new ControlScore();
 			var aiPlayer2 = new AggroScore();
 
 			List<int> mulligan1 = aiPlayer1.MulliganRule().Invoke(game.Player1.Choice.Choices.Select(p => game.IdEntityDic[p]).ToList());
@@ -226,85 +252,146 @@ namespace SabberStoneCoreAi
 			Console.WriteLine($"Game: {game.State}, Player1: {game.Player1.PlayState} / Player2: {game.Player2.PlayState}");
 		}
 
+		public static double EvaluateFitness(List<Card> deck)
+		{
+			int total = 1;
+			var watch = Stopwatch.StartNew();
+
+			var gameConfig = new GameConfig()
+			{
+				StartPlayer = 1,
+				Player1Name = "P1",
+				Player1HeroClass = hero,
+				Player1Deck = deck,
+				Player2Name = "P2",
+				Player2HeroClass = CardClass.WARRIOR,
+				Player2Deck = Decks.AggroPirateWarrior,
+				FillDecks = false,
+				Shuffle = true,
+				SkipMulligan = false,
+				Logging = false,
+				History = false
+			};
+
+			int[] wins = new[] { 0, 0 };
+			for (int i = 0; i < total; i++)
+			{
+				var game = new Game(gameConfig);
+				game.StartGame();
+
+				var aiPlayer1 = new AggroScore();
+				var aiPlayer2 = new AggroScore();
+
+				List<int> mulligan1 = aiPlayer1.MulliganRule().Invoke(game.Player1.Choice.Choices.Select(p => game.IdEntityDic[p]).ToList());
+				List<int> mulligan2 = aiPlayer2.MulliganRule().Invoke(game.Player2.Choice.Choices.Select(p => game.IdEntityDic[p]).ToList());
+
+				// Console.WriteLine($"Player1: Mulligan {String.Join(",", mulligan1)}");
+				// Console.WriteLine($"Player2: Mulligan {String.Join(",", mulligan2)}");
+
+				game.Process(ChooseTask.Mulligan(game.Player1, mulligan1));
+				game.Process(ChooseTask.Mulligan(game.Player2, mulligan2));
+
+				game.MainReady();
+				try
+				{
+					while (game.State != State.COMPLETE)
+					{
+						Console.WriteLine("");
+						// Console.WriteLine($"Player1: {game.Player1.PlayState} / Player2: {game.Player2.PlayState} - " +
+						// 				  $"ROUND {(game.Turn + 1) / 2} - {game.CurrentPlayer.Name}");
+						Console.WriteLine($"Hero[P1]: {game.Player1.Hero.Health} / Hero[P2]: {game.Player2.Hero.Health}");
+						Console.WriteLine("");
+						while (game.State == State.RUNNING && game.CurrentPlayer == game.Player1)
+						{
+							//Console.WriteLine($"* Calculating solutions *** Player 1 ***");
+							List<OptionNode> solutions = OptionNode.GetSolutions(game, game.Player1.Id, aiPlayer1, 10, 500);
+							var solution = new List<PlayerTask>();
+							solutions.OrderByDescending(p => p.Score).First().PlayerTasks(ref solution);
+							//Console.WriteLine($"- Player 1 - <{game.CurrentPlayer.Name}> ---------------------------");
+							foreach (PlayerTask task in solution)
+							{
+								Console.WriteLine(task.FullPrint());
+								game.Process(task);
+								if (game.CurrentPlayer.Choice != null)
+								{
+									//Console.WriteLine($"* Recalculating due to a final solution ...");
+									break;
+								}
+							}
+						}
+
+						// Random mode for Player 2
+						Console.WriteLine("");
+						//Console.WriteLine($"- Player 2 - <{game.CurrentPlayer.Name}> ---------------------------");
+						while (game.State == State.RUNNING && game.CurrentPlayer == game.Player2)
+						{
+							//var options = game.Options(game.CurrentPlayer);
+							//var option = options[Rnd.Next(options.Count)];
+							//Log.Info($"[{option.FullPrint()}]");
+							//game.Process(option);
+							//Console.WriteLine($"* Calculating solutions *** Player 2 ***");
+							List<OptionNode> solutions = OptionNode.GetSolutions(game, game.Player2.Id, aiPlayer2, 10, 500);
+							var solution = new List<PlayerTask>();
+							solutions.OrderByDescending(p => p.Score).First().PlayerTasks(ref solution);
+							//Console.WriteLine($"- Player 2 - <{game.CurrentPlayer.Name}> ---------------------------");
+							foreach (PlayerTask task in solution)
+							{
+								Console.WriteLine(task.FullPrint());
+								game.Process(task);
+								if (game.CurrentPlayer.Choice != null)
+								{
+									//Console.WriteLine($"* Recalculating due to a final solution ...");
+									break;
+								}
+							}
+						}
+					}
+					Console.WriteLine("");
+					Console.WriteLine($"Game: {game.State}, Player1: {game.Player1.PlayState} / Player2: {game.Player2.PlayState}");
+
+					if (game.Player1.PlayState == PlayState.WON)
+						wins[0]++;
+					if (game.Player2.PlayState == PlayState.WON)
+						wins[1]++;
+				}
+				catch (Exception e){
+					Console.WriteLine($"Exception caught: {e}");
+					Console.WriteLine($"{e.ToString()}");
+					Console.WriteLine("Composition of offending deck: ----------------------");
+					foreach(Card card in deck){
+						Console.WriteLine($"{card.ToString()}");
+					}
+					Console.WriteLine("Awarding win to opponent by technicality.");
+					wins[1]++;
+				}
+
+				Console.WriteLine($"Player 1 (Population) Wins: {wins[0]} / Player 2 (Control) Wins: {wins[1]}");
+
+			}
+			watch.Stop();
+
+			Console.WriteLine($"{total} games took {watch.ElapsedMilliseconds / 1000 / 60} minutes!");
+			Console.WriteLine($"Player 1 (Population) {wins[0] * 100 / total}% vs. Player 2 (Control) {wins[1] * 100 / total}%!");
+			return wins[0] * 100 / total;
+
+		}
+
 
 		public static void RandomGames()
 		{
 			int total = 1000;
 			var watch = Stopwatch.StartNew();
 
+			MemberDeck player1 = new MemberDeck();
 			var gameConfig = new GameConfig()
 			{
-				StartPlayer = -1,
+				StartPlayer = 1,
 				Player1Name = "FitzVonGerald",
-				Player1HeroClass = CardClass.PALADIN,
-				Player1Deck = new List<Card>()
-						{
-						Cards.FromName("Blessing of Might"),
-						Cards.FromName("Blessing of Might"),
-						Cards.FromName("Gnomish Inventor"),
-						Cards.FromName("Gnomish Inventor"),
-						Cards.FromName("Goldshire Footman"),
-						Cards.FromName("Goldshire Footman"),
-						Cards.FromName("Hammer of Wrath"),
-						Cards.FromName("Hammer of Wrath"),
-						Cards.FromName("Hand of Protection"),
-						Cards.FromName("Hand of Protection"),
-						Cards.FromName("Holy Light"),
-						Cards.FromName("Holy Light"),
-						Cards.FromName("Ironforge Rifleman"),
-						Cards.FromName("Ironforge Rifleman"),
-						Cards.FromName("Light's Justice"),
-						Cards.FromName("Light's Justice"),
-						Cards.FromName("Lord of the Arena"),
-						Cards.FromName("Lord of the Arena"),
-						Cards.FromName("Nightblade"),
-						Cards.FromName("Nightblade"),
-						Cards.FromName("Raid Leader"),
-						Cards.FromName("Raid Leader"),
-						Cards.FromName("Stonetusk Boar"),
-						Cards.FromName("Stonetusk Boar"),
-						Cards.FromName("Stormpike Commando"),
-						Cards.FromName("Stormpike Commando"),
-						Cards.FromName("Stormwind Champion"),
-						Cards.FromName("Stormwind Champion"),
-						Cards.FromName("Stormwind Knight"),
-						Cards.FromName("Stormwind Knight")
-						},
+				Player1HeroClass = hero,
+				Player1Deck = player1.deck,
 				Player2Name = "RehHausZuckFuchs",
-				Player2HeroClass = CardClass.PALADIN,
-				Player2Deck = new List<Card>()
-						{
-						Cards.FromName("Blessing of Might"),
-						Cards.FromName("Blessing of Might"),
-						Cards.FromName("Gnomish Inventor"),
-						Cards.FromName("Gnomish Inventor"),
-						Cards.FromName("Goldshire Footman"),
-						Cards.FromName("Goldshire Footman"),
-						Cards.FromName("Hammer of Wrath"),
-						Cards.FromName("Hammer of Wrath"),
-						Cards.FromName("Hand of Protection"),
-						Cards.FromName("Hand of Protection"),
-						Cards.FromName("Holy Light"),
-						Cards.FromName("Holy Light"),
-						Cards.FromName("Ironforge Rifleman"),
-						Cards.FromName("Ironforge Rifleman"),
-						Cards.FromName("Light's Justice"),
-						Cards.FromName("Light's Justice"),
-						Cards.FromName("Lord of the Arena"),
-						Cards.FromName("Lord of the Arena"),
-						Cards.FromName("Nightblade"),
-						Cards.FromName("Nightblade"),
-						Cards.FromName("Raid Leader"),
-						Cards.FromName("Raid Leader"),
-						Cards.FromName("Stonetusk Boar"),
-						Cards.FromName("Stonetusk Boar"),
-						Cards.FromName("Stormpike Commando"),
-						Cards.FromName("Stormpike Commando"),
-						Cards.FromName("Stormwind Champion"),
-						Cards.FromName("Stormwind Champion"),
-						Cards.FromName("Stormwind Knight"),
-						Cards.FromName("Stormwind Knight")
-						},
+				Player2HeroClass = CardClass.WARRIOR,
+				Player2Deck = Decks.AggroPirateWarrior,
 				FillDecks = false,
 				Shuffle = true,
 				SkipMulligan = false,
