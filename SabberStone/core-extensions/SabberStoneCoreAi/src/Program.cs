@@ -20,26 +20,23 @@ namespace SabberStoneCoreAi
 	{
 		private static readonly Random Rnd = new Random();
 
-		static int populationSize = 10; // How many decks are in a single generation.
-		static int generationLimit = 100; // How many generations to run in a single sitting.
-		static int games = 10; // How many games to play per fitness evaluation
-
-		static int poolSize = 5;
-		static double mutationChance = 0.10d; // The probability for a random new child deck to mutate.
-
-		static List<Card> allCards;
-		static List<Card> availableCards; // List of cards to choose from when creating / mutating a deck.
 		static CardClass hero = CardClass.PALADIN; // The class used for all population decks.
 
-		static List<MemberDeck> population; // set of all the members of the current generation.
-		static List<MemberDeck> pool; // set of the most fit members of the current generation.
+		static int populationSize = 20; // How many decks are in a single generation.
+		static int generationLimit = 10; // How many generations to run in a single sitting.
+		static int games = 10; // How many games to play per fitness evaluation
 
+		static int poolSize = 10; // Top N decks to use as potential parents for the next generation.
+		static double mutationChance = 0.10d; // The probability for a random new child deck to mutate.
+
+		static List<Card> availableCards; // List of cards to choose from when creating / mutating a deck.
 		static ParallelOptions options = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount }; // for multithreading
 
+		// representation of a population member
 		public class MemberDeck
 		{
 			public List<Card> deck;
-			public double fitness; // Represents how fit the deck is, usually by winrate.
+			public double fitness; // Represents how fit the deck is, determined by winrate.
 
 			public MemberDeck(){
 				deck = randomCards(30); // for inital population members
@@ -52,7 +49,7 @@ namespace SabberStoneCoreAi
 			}
 
 			public void mutateDeck(){
-				// if (random < mutationChance), mutate a random card in the deck.
+				// if (random < mutationChance), replace a random card in the deck.
 				if (Rnd.NextDouble() < mutationChance){
 					// Choose a card in the original deck to mutate.
 					int oldCard = Rnd.Next(deck.Count);
@@ -68,7 +65,36 @@ namespace SabberStoneCoreAi
 					deck[oldCard] = newCard;
 				}
 			}
+		}
 
+		// Filter cards into the list of available cards
+		public static void filterCards()
+		{
+			availableCards = new List<Card>();
+			foreach (Card card in Cards.AllStandard)
+			{
+				if (card.Class == CardClass.NEUTRAL || card.Class ==  hero)
+					availableCards.Add(card);
+			}
+		}
+
+		// generate N random cards from the entire deckspace of legal cards
+		public static List<Card> randomCards(int n)
+		{
+			List<Card> cards = new List<Card>();
+			for (int i = 0; i < n; i++){
+				int r = Rnd.Next(availableCards.Count);
+				Card card = availableCards[r];
+				int count = cards.Where(s=>s!=null && s.Equals(card)).Count();
+				// check that you're not exceeding valid card counts
+				while ((card.Rarity == Rarity.LEGENDARY && count > 0) || (card.Rarity != Rarity.LEGENDARY && count > 1)) {
+					r = Rnd.Next(availableCards.Count);
+					card = availableCards[r];
+					count = cards.Where(s=>s!=null && s.Equals(card)).Count();
+				}
+				cards.Add(card);
+			}
+			return cards;
 		}
 
 		// naive implementation: randomly take half the cards from one parent and half the cards from the other to form a child.
@@ -81,7 +107,7 @@ namespace SabberStoneCoreAi
 				Card newCard = first_parent[r];
 				int count = child.Where(s=>s!=null && s.Equals(newCard)).Count();
 
-				// generate a new card until it's valid for this deck.
+				// check that you're not exceeding valid card counts
 				while ((newCard.Rarity == Rarity.LEGENDARY && count > 0) || (newCard.Rarity != Rarity.LEGENDARY && count > 1)) {
 					r = Rnd.Next(first_parent.Count);
 					newCard = first_parent[r];
@@ -95,7 +121,7 @@ namespace SabberStoneCoreAi
 				Card newCard = second_parent[r];
 				int count = child.Where(s=>s!=null && s.Equals(newCard)).Count();
 
-				// generate a new card until it's valid for this deck.
+				// check that you're not exceeding valid card counts
 				while ((newCard.Rarity == Rarity.LEGENDARY && count > 0) || (newCard.Rarity != Rarity.LEGENDARY && count > 1)) {
 					r = Rnd.Next(second_parent.Count);
 					newCard = second_parent[r];
@@ -106,118 +132,7 @@ namespace SabberStoneCoreAi
 			return child;
 		}
 
-		// Filter cards into the list of available cards
-		public static void filterCards()
-		{
-			allCards = new List<Card>();
-			foreach (Card card in Cards.AllStandard)
-			{
-				if (!allCards.Contains(card)
-                    && card.Implemented
-                    && card.Collectible
-                    && card.Set == CardSet.CORE || card.Set == CardSet.EXPERT1
-                    && card.Type != CardType.HERO
-                    && card.Type != CardType.ENCHANTMENT
-                    && card.Type != CardType.INVALID
-                    && card.Type != CardType.HERO_POWER
-                    && card.Type != CardType.TOKEN
-                    )
-					allCards.Add(card);
-			}
-			availableCards = new List<Card>();
-			foreach (Card card in allCards)
-			{
-				if (card.Class == CardClass.NEUTRAL || card.Class ==  hero)
-					availableCards.Add(card);
-			}
-		}
-
-		private static void Main(string[] args)
-		{
-			Console.WriteLine("Starting test setup.");
-			// initialize available cards and generate initial population
-			filterCards();
-			population = new List<MemberDeck>();
-			pool = new List<MemberDeck>();
-			for (int k = 0; k < populationSize; k++){
-				MemberDeck deck = new MemberDeck();
-				population.Add(deck);
-			}
-
-			// running the generations
-			int currentGeneration = 1;
-			while (currentGeneration <= generationLimit){
-				Console.WriteLine($"Current generation: {currentGeneration}");
-
-				foreach (MemberDeck member in population){
-					member.fitness = EvaluateFitness(member.deck);
-				}
-
-				for (int i = 0; i < populationSize; i++){	
-					if (pool.Count == 0)
-						pool.Add(population[i]);
-					else if (population[i].fitness > pool[pool.Count - 1].fitness){
-						int j = pool.Count - 1;
-						for (; j >= 0; j--){
-							if (j == 0 || population[i].fitness < pool[j-1].fitness)
-								break;
-						}
-						pool.Insert(j, population[i]);
-						// Trim the size of pool if its max is exceeded.
-						if (pool.Count > poolSize)
-							pool.RemoveAt(poolSize);
-					}
-					else if (pool.Count < poolSize)
-						pool.Add(population[i]);
-				}
-				Console.WriteLine("");	
-				Console.WriteLine($"Best fitness: {pool[0].fitness}");
-				Console.WriteLine("Composition of best deck: ----------------------");
-				for (int i = 0; i < 30; i++){
-					Console.WriteLine($"{pool[0].deck[i].ToString()}");
-				}
-				// naive implementation of parent selection, direct random pool.
-				// Always copy the most fit member of the previous generation.
-				currentGeneration++;
-				if (currentGeneration > generationLimit)
-					break;
-				else{
-					population.Clear();
-					population.Add(pool[0]);
-					for (int k = 1; k < populationSize; k++){
-						int first = Rnd.Next(pool.Count);
-						int second = Rnd.Next(pool.Count);
-
-						List<Card> child = childDeck(pool[first].deck, pool[second].deck);
-						MemberDeck deck = new MemberDeck(child);
-						deck.mutateDeck();
-
-						population.Add(deck);
-					}
-					pool.Clear();
-				}
-			}	
-			Console.WriteLine("Test end!");
-		}
-
-		public static List<Card> randomCards(int n)
-		{
-			List<Card> cards = new List<Card>();
-			for (int i = 0; i < n; i++){
-				int r = Rnd.Next(availableCards.Count);
-				Card card = availableCards[r];
-				int count = cards.Where(s=>s!=null && s.Equals(card)).Count();
-				// check that the set of cards you're returning is valid as a standalone set.
-				while ((card.Rarity == Rarity.LEGENDARY && count > 0) || (card.Rarity != Rarity.LEGENDARY && count > 1)) {
-					r = Rnd.Next(availableCards.Count);
-					card = availableCards[r];
-					count = cards.Where(s=>s!=null && s.Equals(card)).Count();
-				}
-				cards.Add(card);
-			}
-			return cards;
-		}
-
+		// determine the "fitness" of the deck by its performance against the control deck
 		public static double EvaluateFitness(List<Card> deck)
 		{
 			var watch = Stopwatch.StartNew();
@@ -239,6 +154,8 @@ namespace SabberStoneCoreAi
 
 			int player_wins = 0;
 			int control_wins = 0;
+			// simulate games between the member deck and the control deck, tracking wins
+			// most efficient performance seems to be 1 game / thread per core
 			Parallel.For(0, games, options, i =>
 			{
 				var game = new Game(gameConfig);
@@ -269,13 +186,11 @@ namespace SabberStoneCoreAi
 								//Console.WriteLine(task.FullPrint());
 								game.Process(task);
 								if (game.CurrentPlayer.Choice != null)
-								{
 									break;
-								}
 							}
 						}
 						while (game.State == State.RUNNING && game.CurrentPlayer == game.Player2)
-						{;
+						{
 							List<OptionNode> solutions = OptionNode.GetSolutions(game, game.Player2.Id, aiPlayer2, 10, 500);
 							var solution = new List<PlayerTask>();
 							solutions.OrderByDescending(p => p.Score).First().PlayerTasks(ref solution);
@@ -302,7 +217,7 @@ namespace SabberStoneCoreAi
 					Console.WriteLine("Awarding win to opponent.");
 					Interlocked.Increment(ref control_wins);
 				}
-				Console.WriteLine($"Player 1 (Population) Wins: {player_wins} / Player 2 (Control) Wins: {control_wins}");
+				Console.WriteLine($"Player 1 Wins: {player_wins} / Player 2 Wins: {control_wins}");
 			});
 			watch.Stop();
 			Console.WriteLine("");
@@ -310,6 +225,81 @@ namespace SabberStoneCoreAi
 			Console.WriteLine($"Player 1 (Population) {player_wins * 100 / games}% vs. Player 2 (Control) {control_wins * 100 / games}%!");
 			Console.WriteLine("");
 			return player_wins * 100 / games;
+		}
+
+		private static void Main(string[] args)
+		{
+			Console.WriteLine("Starting test setup.");
+			Console.WriteLine("");	
+			// initialize available cards and generate initial population
+			filterCards();
+			List<MemberDeck> population = new List<MemberDeck>();
+			List<MemberDeck> pool = new List<MemberDeck>();
+
+			for (int k = 0; k < populationSize; k++){
+				MemberDeck deck = new MemberDeck();
+				population.Add(deck);
+			}
+
+			// running the generations
+			int currentGeneration = 1;
+			while (currentGeneration <= generationLimit){
+				Console.WriteLine($"Current generation: {currentGeneration}");
+				Console.WriteLine("---------------------------------------");	
+				// evaluate fitness of each deck
+				int count = 1;
+				foreach (MemberDeck member in population){
+					Console.WriteLine($"Evaluating deck #{count++}:");
+					member.fitness = EvaluateFitness(member.deck);
+					// member.fitness = Rnd.NextDouble();
+				}
+				// select the top N decks as the breeding pool.
+				// slightly more efficient than sorting the entire list
+				double average = 0d; 
+				for (int i = 0; i < populationSize; i++){
+					average += population[i].fitness;	
+					if (pool.Count > 0 && population[i].fitness > pool[pool.Count - 1].fitness){
+						int j = pool.Count - 1;
+						for (; j >= 0; j--){
+							if (j == 0 || population[i].fitness < pool[j-1].fitness)
+								break;
+						}
+						pool.Insert(j, population[i]);
+						// Trim the size of pool if its max is exceeded.
+						if (pool.Count > poolSize)
+							pool.RemoveAt(poolSize);
+					}
+					else if (pool.Count < poolSize)
+						pool.Add(population[i]);
+				}
+				Console.WriteLine("");	
+				Console.WriteLine($"Best fitness: {pool[0].fitness} || Average fitness: {average / populationSize}");
+				Console.WriteLine("Composition of best deck:");
+				for (int i = 0; i < 30; i++){
+					Console.WriteLine($"{pool[0].deck[i].ToString()}");
+				}
+				Console.WriteLine("");
+				currentGeneration++;
+				if (currentGeneration > generationLimit)
+					break;
+				// naive implementation of parent selection, direct random pool.
+				else{
+					population.Clear();
+					population.Add(pool[0]); // Always copy the most fit member of the previous generation.
+					for (int k = 1; k < populationSize; k++){
+						int first = Rnd.Next(pool.Count);
+						int second = Rnd.Next(pool.Count);
+						// create a child from two parents, then give it the chance to mutate.
+						List<Card> child = childDeck(pool[first].deck, pool[second].deck);
+						MemberDeck deck = new MemberDeck(child);
+						deck.mutateDeck();
+
+						population.Add(deck);
+					}
+					pool.Clear();
+				}
+			} // end while	
+			Console.WriteLine("Test end!");
 		}
 	}
 }
